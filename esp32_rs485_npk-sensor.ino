@@ -1,160 +1,99 @@
-// github link: https://github.com/4-20ma/ModbusMaster
+#include <Arduino.h>
 #include <ModbusMaster.h>
+#include <SoftwareSerial.h>
 
-/* Modbus stuff */
-#define MODBUS_DIR_PIN  4 // connect DR, RE pin of MAX485 to gpio 4
-#define MODBUS_RX_PIN 18 // Rx pin  
-#define MODBUS_TX_PIN 19 // Tx pin 
-#define MODBUS_SERIAL_BAUD 4800 // Baud rate for esp32 and max485 communication
+// Tentukan pin untuk RX dan TX
+const int RX_PIN = 5; // Pin untuk menerima data
+const int TX_PIN = 18; // Pin untuk mengirim data
 
-#define num_parameters 9
-// voltage, current and frequency data register of DDM18SD
-uint16_t data_register[num_parameters] = {0x0000,  //moisture
-                                          0x0001,  //temperature
-                                          0x0002,  //conductivity
-                                          0x0003,  //ph
-                                          0x0004,  //nitrogent
-                                          0x0005,  //phosporus
-                                          0x0006,  //potassium
-                                          0x0007,  //salinity
-                                          0x0008   //tds
-                                         };
-
-//Initialize the ModbusMaster object as node
+// Inisialisasi SoftwareSerial dan ModbusMaster
+SoftwareSerial rs485Serial(RX_PIN, TX_PIN);
 ModbusMaster node;
 
-// Pin 4 made high for Modbus transmision mode
-void modbusPreTransmission()
-{
-  delay(500);
-  digitalWrite(MODBUS_DIR_PIN, HIGH);
-}
-// Pin 4 made low for Modbus receive mode
-void modbusPostTransmission()
-{
-  digitalWrite(MODBUS_DIR_PIN, LOW);
-  delay(500);
+void setup() {
+  Serial.begin(9600);      // Memulai komunikasi serial dengan komputer
+  rs485Serial.begin(4800); // Memulai komunikasi dengan baudrate 4800
+
+  node.begin(1, rs485Serial); // Inisialisasi Modbus dengan alamat slave 1
+
+  Serial.println("Modbus RS485 Reader is ready.");
 }
 
-
-void setup()
-{
-  //  esp serial communication
-  Serial.begin(115200);
-  pinMode(MODBUS_DIR_PIN, OUTPUT);
-  digitalWrite(MODBUS_DIR_PIN, LOW);
-
-  //Serial2.begin(baud-rate, protocol, RX pin, TX pin);.
-  Serial2.begin(MODBUS_SERIAL_BAUD, SERIAL_8E1, MODBUS_RX_PIN, MODBUS_TX_PIN);
-  Serial2.setTimeout(200);
-  //modbus slave ID 14
-  node.begin(14, Serial2);
-
-  //  callbacks allow us to configure the RS485 transceiver correctly
-  node.preTransmission(modbusPreTransmission);
-  node.postTransmission(modbusPostTransmission);
-
-}
-
-void loop()
-{
+void loop() {
   uint8_t result;
-  uint16_t data[2];
-  int i;
-  float reading;
-  for (i = 0; i <= num_parameters; i++) {
-    //Modbus function 0x04 Read Input Registers according to energy meter datasheet
-    result = node.readInputRegisters(data_register[i], 1);
+  float registerValues[9]; // Array untuk menyimpan nilai dari register 0x0001 sampai 0x0008
+
+  // Membaca register dari alamat 0x0001 sampai 0x0008
+  for (uint8_t i = 0; i < 9; i++) {
+    result = node.readHoldingRegisters(0x0000 + i, 1); // Membaca 1 register
+
     if (result == node.ku8MBSuccess) {
-      Serial.println("Success, Received data: ");
+      uint16_t rawValue = node.getResponseBuffer(0);
+      registerValues[i] = rawValue / 10.0; // Bagi dengan 10 untuk mendapatkan nilai yang benar
+    } else {
+      Serial.print("Error reading Register 0x000");
+      Serial.print(i + 1);
+      Serial.print(": ");
+      Serial.println(result); // Tampilkan error jika ada
+      registerValues[i] = 0; // Simpan 0 jika ada error
+    }
+  }
+  Serial.println("======================");
+  // Menampilkan nilai register yang disimpan dalam array
+  for (uint8_t i = 0; i < 9; i++) {
+    // Membaca nilai berdasarkan indeks
+    float reading = registerValues[i]; // Mengambil nilai dari array
 
-      //Retrieve the data from getResponseBuffer(uint8_t u8Index) function.
-      //that is return 16-bit data. our energy meter return 32-bit data everytime.
-      //that's why, we take the value to a array called data
-      data[0] = node.getResponseBuffer(0x00);
-      data[1] = node.getResponseBuffer(0x01);
-
-      //read voltage
-      if (data_register[i] == 0x0000) {
+    switch (i) {
+      case 0:
         Serial.print("Moisture: ");
-        // we just convert the uint16_t type data array to float type using type casting
-        reading = *((float *)data);
         Serial.print(reading);
         Serial.println(" %");
-      }
-      //read current
-      if (data_register[i] == 0x0001) {
+        break;
+      case 1:
         Serial.print("Temperature: ");
-        // we just convert the uint16_t type data array to float type using type casting
-        reading = *((float *)data);
         Serial.print(reading);
-        Serial.println(" C");
-      }
-      //read Frequency
-      if (data_register[i] == 0x0002) {
+        Serial.println(" °C");
+        break;
+      case 2:
         Serial.print("Conductivity: ");
-        // we just convert the uint16_t type data array to float type using type casting
-        reading = *((float *)data);
         Serial.print(reading);
         Serial.println(" us/cm");
-      }
-      //read voltage
-      if (data_register[i] == 0x0003) {
+        break;
+      case 3:
         Serial.print("pH: ");
-        // we just convert the uint16_t type data array to float type using type casting
-        reading = *((float *)data);
         Serial.print(reading);
         Serial.println(" PH");
-      }
-      //read current
-      if (data_register[i] == 0x0004) {
-        Serial.print("Nitrogent: ");
-        // we just convert the uint16_t type data array to float type using type casting
-        reading = *((float *)data);
+        break;
+      case 4:
+        Serial.print("Nitrogen: ");
         Serial.print(reading);
         Serial.println(" mg/L");
-      }
-      //read Frequency
-      if (data_register[i] == 0x0005) {
+        break;
+      case 5:
         Serial.print("Phosphorus: ");
-        // we just convert the uint16_t type data array to float type using type casting
-        reading = *((float *)data);
         Serial.print(reading);
         Serial.println(" mg/L");
-      }
-      //read voltage
-      if (data_register[i] == 0x0006) {
+        break;
+      case 6:
         Serial.print("Potassium: ");
-        // we just convert the uint16_t type data array to float type using type casting
-        reading = *((float *)data);
         Serial.print(reading);
         Serial.println(" mg/L");
-      }
-      //read current
-      if (data_register[i] == 0x0007) {
+        break;
+      case 7:
         Serial.print("Salinity: ");
-        // we just convert the uint16_t type data array to float type using type casting
-        reading = *((float *)data);
         Serial.print(reading);
         Serial.println(" ppt");
-      }
-      //read Frequency
-      if (data_register[i] == 0x0008) {
+        break;
+      case 8:
         Serial.print("TDS: ");
-        // we just convert the uint16_t type data array to float type using type casting
-        reading = *((float *)data);
         Serial.print(reading);
         Serial.println(" mg/L");
-      }
-    }
-    else {
-      Serial.print("Failed, Response Code: ");
-      Serial.print(result, HEX);
-      Serial.println("");
-      delay(5000);
-    }
+        break;
 
+    }
   }
+  Serial.println("======================");
 
-  delay(1000);
+  delay(2000); // Tunggu 2 detik sebelum membaca lagi
 }
